@@ -7,6 +7,20 @@ SELECT compare_json_to_postgres(
     "object" : {
       "boolean" : true,
       "null" : null
-    }
+    },
+    "array" : [
+      {
+        "int" : 1234,
+        "char" : "a"
+      },
+      {
+        "fake" : 67,
+        "faker" : "j"
+      },
+      {
+        "int" : 9,
+        "char" : "z"
+      }
+    ]
   }'
 )

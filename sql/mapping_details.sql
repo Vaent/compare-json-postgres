@@ -47,6 +47,20 @@ VALUES (
   'pg_empty'
 ), (
   'sample_json',
+  'array,int',
+--  'my_schema',
+  null,
+  'sample_2',
+  'pg_int'
+), (
+  'sample_json',
+  'array,char',
+--  'my_schema',
+  null,
+  'sample_2',
+  'pg_char'
+), (
+  'sample_json',
   'altObject,int',
   'alt_schema',
   'alt_table',
