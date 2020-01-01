@@ -7,22 +7,14 @@ RETURNS void
 LANGUAGE plpgsql
 AS $PROC$
 DECLARE
-  var_count_fields_present_in_json int;
-  var_first_condition bool;
-  var_json_value json;
-  var_json_values json[];
-  var_json_values_previous json[];
-  --var_mapping my_schema.mapping_details%ROWTYPE;
-  var_mapping mapping_details%ROWTYPE;
   var_match_count int;
   var_message text;
-  var_path text[];
-  var_path_element text;
   var_query text;
   var_schema_name text;
   var_table_name text;
   var_table_ref text;
 BEGIN
+  <<each_schema>>
   FOR var_schema_name IN
     SELECT DISTINCT db_schema
       --FROM my_schema.mapping_details
@@ -31,6 +23,7 @@ BEGIN
   LOOP
     RAISE DEBUG 'schema: %', var_schema_name;
     
+    <<each_table_in_schema>>
     FOR var_table_name IN
       SELECT DISTINCT db_table
         --FROM my_schema.mapping_details
@@ -46,12 +39,15 @@ BEGIN
         WHEN var_schema_name IS NULL THEN var_table_name
         ELSE var_schema_name || '.' || var_table_name
         END;
+      IF to_regclass(var_table_ref) IS NULL THEN
+        RAISE DEBUG 'Table % does not exist - skipping', var_table_ref;
+        CONTINUE each_table_in_schema;
+      END IF;
       
-      var_query := 'SELECT COUNT(*) FROM ' || var_table_ref;
-      var_first_condition := true;
-      var_count_fields_present_in_json := 0;
-      FOR var_mapping IN
-        SELECT *
+      --SELECT my_schema.determine_query_conditions(
+      SELECT determine_query_conditions(
+        par_json,
+        (SELECT array_agg(ARRAY[json_path, db_column])
           --FROM my_schema.mapping_details
           FROM mapping_details
           WHERE json_type = par_json_type
@@ -59,55 +55,13 @@ BEGIN
             WHEN var_schema_name IS NULL THEN db_schema IS NULL
             ELSE db_schema = var_schema_name
             END
-          AND db_table = var_table_name
-      LOOP
-        var_path := string_to_array((var_mapping).json_path, ',');
-        var_json_values := ARRAY[par_json];
-        
-        FOREACH var_path_element IN ARRAY var_path LOOP
-          var_json_values_previous := var_json_values;
-          var_json_values := ARRAY[]::json[];
-          FOREACH var_json_value IN ARRAY var_json_values_previous LOOP
-            var_json_value := var_json_value -> var_path_element;
-            IF var_json_value IS NOT NULL THEN
-              IF var_json_value::text LIKE '[%]' THEN
-                var_json_values := var_json_values || ARRAY(SELECT json_array_elements(var_json_value));
-              ELSE
-                var_json_values := var_json_values || var_json_value;
-              END IF;
-            END IF;
-          END LOOP;
-        END LOOP;
-        RAISE DEBUG 'path "%" -> values {%}', (var_mapping).json_path, array_to_string(var_json_values, ',');
-        
-        var_query := var_query || CASE
-          WHEN var_first_condition = true THEN ' WHERE ('
-          ELSE ' AND ('
-          END;
-        var_first_condition := false;
-        IF array_length(var_json_values, 1) IS NULL THEN
-          var_query := var_query || (var_mapping).db_column || ' IS NULL';
-        ELSE
-          var_count_fields_present_in_json := var_count_fields_present_in_json + 1;
-          FOR ind IN 1..array_length(var_json_values, 1) LOOP
-            var_json_value := var_json_values[ind];
-            var_query := var_query || (var_mapping).db_column || CASE
-              WHEN (var_json_value IS NULL OR var_json_value::text = 'null') THEN ' IS NULL'
-              WHEN var_json_value::text LIKE '"%"' THEN ' = ' || '$str$' || TRIM('"' FROM var_json_value::text) || '$str$'
-              ELSE ' = ' || var_json_value
-            END;
-            IF ind < array_length(var_json_values, 1) THEN
-              var_query := var_query || ' OR ';
-            END IF;
-          END LOOP;
-        END IF;
-        var_query := var_query || ')';
-        
-      END LOOP;
+          AND db_table = var_table_name)
+      ) INTO var_query;
       
-      IF var_count_fields_present_in_json = 0 THEN
+      IF var_query = '' THEN
         RAISE NOTICE 'The JSON contains no fields associated with the "%" table', var_table_ref;
       ELSE
+        var_query := 'SELECT COUNT(*) FROM ' || var_table_ref || ' WHERE ' || var_query;
         RAISE DEBUG 'Executing query: %', var_query;
         EXECUTE var_query INTO var_match_count;
         var_message := '"' || var_table_ref || '" table contains ' || var_match_count
@@ -118,8 +72,99 @@ BEGIN
           || ' matching the JSON';
         RAISE NOTICE '%', var_message;
       END IF;
-      
-    END LOOP;
+    END LOOP each_table_in_schema;
+  END LOOP each_schema;
+END;
+$PROC$;
+
+
+
+--CREATE FUNCTION my_schema.determine_query_conditions
+CREATE FUNCTION determine_query_conditions(
+  par_json json,
+  par_paths_with_columns text[][2]
+)
+RETURNS text
+LANGUAGE plpgsql
+AS $PROC$
+DECLARE
+  var_field_exists_in_json bool;
+  var_path text[];
+  var_path_children text[][2];
+  var_path_parent text;
+  var_path_with_column text[];
+  var_query_statements text[];
+  var_query_statements_for_array text[];
+  var_value json;
+  var_value_sub json;
+BEGIN
+  var_query_statements := '{}';
+  var_field_exists_in_json := false;
+  FOR n IN 1..array_length(par_paths_with_columns, 1)
+  LOOP
+    var_path := string_to_array(par_paths_with_columns[n][1], ',');
+    var_value := par_json;
+    <<get_json_value>>
+    FOR x IN 1..array_length(var_path, 1)
+    LOOP
+      var_value := var_value #> ARRAY[var_path[x]];
+      IF var_value::text LIKE '[%]' THEN
+        var_path_parent := array_to_string(var_path[:x], ',') || ',';
+        var_path := var_path[(x+1):];
+        EXIT get_json_value;
+      END IF;
+    END LOOP get_json_value;
+
+    IF var_value::text LIKE '[%]' THEN
+      -- array handling
+      var_path_children = ARRAY[ARRAY[]]::text[];
+      <<each_path_column_pair>>
+      FOREACH var_path_with_column SLICE 1 IN ARRAY par_paths_with_columns
+      LOOP
+        IF var_path_with_column[1] LIKE (var_path_parent || '%') THEN
+          var_path_children := array_cat(
+            var_path_children,
+            ARRAY[ARRAY[REPLACE(var_path_with_column[1], var_path_parent, ''), var_path_with_column[2]]]
+          );
+        END IF;
+      END LOOP each_path_column_pair;
+      var_query_statements_for_array := '{}';
+      <<prepare_array_statement>>
+      FOREACH var_value_sub IN ARRAY ARRAY(SELECT json_array_elements(var_value))
+      LOOP
+        var_query_statements_for_array := array_append(
+          var_query_statements_for_array,
+          --(SELECT my_schema.determine_query_conditions(var_value_sub, var_path_children))
+          (SELECT determine_query_conditions(var_value_sub, var_path_children))
+        );
+        var_query_statements_for_array := array_remove(var_query_statements_for_array, '');
+      END LOOP prepare_array_statement;
+      IF array_length(var_query_statements_for_array, 1) > 0 THEN
+        var_field_exists_in_json := true;
+        var_query_statements := array_append(
+          var_query_statements,
+          '((' || array_to_string(var_query_statements_for_array, ') OR (') || '))'
+        );
+      END IF;
+      -- end array handling
+    ELSE
+      IF var_value IS NOT NULL THEN
+        var_field_exists_in_json := true;
+      END IF;
+      var_query_statements := array_append(
+        var_query_statements,
+        par_paths_with_columns[n][2] || CASE
+          WHEN (var_value IS NULL OR var_value::text = 'null') THEN ' IS NULL'
+          WHEN var_value::text LIKE '"%"' THEN ' = $str$' || TRIM('"' FROM var_value::text) || '$str$'
+          ELSE ' = ' || var_value
+          END
+      );
+    END IF;
   END LOOP;
+  IF var_field_exists_in_json THEN
+    RETURN (array_to_string(var_query_statements, ' AND '));
+  ELSE
+    RETURN '';
+  END IF;
 END;
 $PROC$;

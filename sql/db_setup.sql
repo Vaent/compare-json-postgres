@@ -42,6 +42,9 @@ INSERT INTO sample_2 (
 ), (
   9,
   'z'
+), (
+  9,
+  'a'
 );
 
 --SELECT * FROM my_schema.sample;
