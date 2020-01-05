@@ -1,8 +1,0 @@
-{
-  "text" : "A string of characters",
-  "numeric" : 123.456,
-  "object" : {
-    "boolean" : true,
-    "null" : null
-  }
-}
