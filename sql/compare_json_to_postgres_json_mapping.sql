@@ -20,22 +20,22 @@ BEGIN
   END IF;
 
   <<each_schema>>
-  FOREACH var_schema_name IN ARRAY
-    (SELECT array_agg(DISTINCT value::json->>'db_schema')
+  FOR var_schema_name IN
+    SELECT DISTINCT value::json->>'db_schema'
       FROM json_array_elements(par_mapping_details)
-      WHERE value::json->>'json_type' = par_json_type)
+      WHERE value::json->>'json_type' = par_json_type
   LOOP
     RAISE DEBUG 'schema: %', var_schema_name;
 
     <<each_table_in_schema>>
-    FOREACH var_table_name IN ARRAY
-      (SELECT array_agg(DISTINCT value::json->>'db_table')
+    FOR var_table_name IN
+      SELECT DISTINCT value::json->>'db_table'
         FROM json_array_elements(par_mapping_details)
         WHERE value::json->>'json_type' = par_json_type
         AND CASE
           WHEN var_schema_name IS NULL THEN value::json->>'db_schema' IS NULL
           ELSE value::json->>'db_schema' = var_schema_name
-          END)
+          END
     LOOP
       RAISE DEBUG 'table: %', var_table_name;
       var_table_ref := CASE
