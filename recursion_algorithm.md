@@ -22,49 +22,47 @@ A loop can then be created to cycle through rows in the table until all are mark
 Existing logic can be repurposed to identify array subpaths and associate them with parent JSON fragments.
 
 `group` is to be constructed as follows:
-- the identifier for the base JSON object is `0a`
-- while following a path or subpath, whenever an array is encountered, an additional identifier is appended (using a hyphen delimiter in the example below)
-- the numeric component of the identifier uniquely identifies the array; obtained by checking the table for rows with the same parent group, identifying the highest value currently in use at the same level, and incrementing)
-- the alphabetic component of the identifier uniquely identifies the array element
+- the identifier for the base JSON object is `0-0`
+- while following a path or subpath, whenever an array is encountered, an additional identifier is appended
+- the first part of the identifier uniquely identifies the JSON array/path; it is obtained by checking the table for rows with the same parent group, identifying the highest value currently in use at the same level, and incrementing)
+- the second part of the identifier uniquely identifies each element in the array
 
-group    | description
-:--------|:------------
-0a       | any direct path from the root object
-0a-0a    | subpaths of first array field under root object, first object in array
-0a-0b    | subpaths of first array field under root object, second object in array
-0a-0a-0a | subpaths of first nested array field (under first object in first array field), first object in array
-0a-0b-0a | subpaths of first nested array field (under second object in first array field), first object in array
-0a-1a    | subpaths of second array field under root object, first object in array
-0a-1b    | subpaths of second array field under root object, second object in array
+group         | description
+:-------------|:------------
+{0-0}         | any direct path from the root object
+{0-0,0-0}     | subpaths of first array field under root object, first object in array
+{0-0,0-1}     | subpaths of first array field under root object, second object in array
+{0-0,0-0,0-0} | subpaths of first nested array field (under first object in first array field), first object in array
+{0-0,0-1,0-0} | subpaths of first nested array field (under second object in first array field), first object in array
+{0-0,1-0}     | subpaths of second array field under root object, first object in array
+{0-0,1-1}     | subpaths of second array field under root object, second object in array
 
 This maintains the associations which form the basis of AND/OR logic in the eventual SELECT statement:
 ```
-(0a).x AND (0a).y
+{0-0}.x AND {0-0}.y
 AND
 (
   (
-    (0a-0a).f
+    {0-0,0-0}.f
     AND
     (
       (
-        (0a-0a-0a).g AND (0a-0a-0a).h
+        {0-0,0-0,0-0}.g AND {0-0,0-0,0-0}.h
       )
       OR
       (
-        (0a-0a-0b).g AND (0a-0a-0b).h
+        {0-0,0-0,0-1}.g AND {0-0,0-0,0-1}.h
       )
     )
   )
   OR
   (
-    (0a-0b).f
+    {0-0,0-1}.f
     AND...
   )
 AND
 (
   (
-    (0a-1a)...
+    {0-0,1-0}...
 ```
-As seen in the example, fields with identical `group` are joined by AND clauses, then OR clauses are used where only the alphabetic component differs (different elements in the same array), beginning with the deepest nested groups and working up the hierarchy.
-
-Note that to allow for numerous and very large arrays, both the numeric and alphabetic components should be of arbitrary length, not single characters. This has implications for how the identifier is deconstructed, and how the alphabetic component is incremented once it reaches 'z'.
+As seen in the example, fields with identical `group` are joined by AND clauses, then OR clauses are used where only the second part of the identifier differs (different elements in the same array), beginning with the deepest nested groups and working up the hierarchy.

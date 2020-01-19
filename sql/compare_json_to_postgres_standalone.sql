@@ -8,10 +8,13 @@ DECLARE
   var_match_count int;
   var_message text;
   var_path text[];
+  var_path_children jsonb[];
   var_path_parent text;
   var_query text;
   -- var_query_statements text[];
   -- var_query_statements_for_array text[];
+  var_grp_array_element int;
+  var_grp_full_ref jsonb;
   var_resolution_table jsonb[];
   var_row jsonb;
   var_rows_left_to_inspect int;
@@ -61,7 +64,7 @@ BEGIN
       SELECT array_agg(jsonb_build_object(
           'json_path', value::json ->> 'json_path',
           'db_column', value::json ->> 'db_column',
-          'group', ARRAY['0a'],
+          'group', ARRAY['0-0'],
           'root_json', par_json,
           'resolved', false))
         FROM json_array_elements(par_mapping_details)
@@ -97,6 +100,7 @@ BEGIN
 
         IF jsonb_typeof(var_value) = 'array' THEN
           -- array handling
+          var_path_children := ARRAY[]::text[];
           var_index = 1;
           var_rows_left_to_inspect = array_length(var_resolution_table, 1);
           <<get_array_descendants>>
@@ -105,23 +109,35 @@ BEGIN
               EXIT get_array_descendants;
             END IF;
             IF (var_resolution_table[var_index] ->> 'json_path') LIKE (var_path_parent || '%') THEN
-              FOREACH var_value_sub IN ARRAY ARRAY(SELECT jsonb_array_elements(var_value))
-              LOOP
-                var_resolution_table := var_resolution_table ||
-                  jsonb_build_object(
-                    'json_path', REPLACE(var_resolution_table[var_index] ->> 'json_path', var_path_parent, ''),
-                    'db_column', var_resolution_table[var_index] ->> 'db_column',
-                    'group', (var_resolution_table[var_index] -> 'group') || '"0a"',
-                    'root_json', var_value_sub,
-                    'resolved', false
-                  );
-                END LOOP;
+              var_path_children := var_path_children ||
+                jsonb_build_object(
+                  'json_path', REPLACE(var_resolution_table[var_index] ->> 'json_path', var_path_parent, ''),
+                  'db_column', var_resolution_table[var_index] ->> 'db_column',
+                  'group', (var_resolution_table[var_index] -> 'group'),
+                  'resolved', false
+                );
               var_resolution_table := var_resolution_table[:var_index - 1] || var_resolution_table[var_index + 1:];
               var_rows_left_to_inspect := var_rows_left_to_inspect - 1;
             ELSE
               var_index := var_index + 1;
             END IF;
           END LOOP get_array_descendants;
+
+          IF array_length(var_path_children, 1) > 0 THEN
+            var_grp_array_element = 0;
+            <<each_array_element>>
+            FOREACH var_value_sub IN ARRAY ARRAY(SELECT jsonb_array_elements(var_value))
+            LOOP
+              var_grp_full_ref = to_jsonb(0 || '-' || var_grp_array_element);
+              FOREACH var_row IN ARRAY var_path_children
+              LOOP
+                var_row := jsonb_set(var_row, ARRAY['group'], var_row -> 'group' || var_grp_full_ref);
+                var_row := jsonb_set(var_row, ARRAY['root_json'], var_value_sub);
+                var_resolution_table := var_resolution_table || var_row;
+              END LOOP ;
+              var_grp_array_element := var_grp_array_element + 1;
+            END LOOP each_array_element;
+          END IF;
           -- var_query_statements_for_array := '{}';
           -- <<prepare_array_statement>>
           -- FOREACH var_value_sub IN ARRAY ARRAY(SELECT json_array_elements(var_value))
