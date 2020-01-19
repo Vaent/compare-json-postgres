@@ -4,14 +4,16 @@ This change is to allow development of code which can be run without creating an
 
 It will not be possible to resolve every JSON path fully when first inspected, as any arrays on the path require the path resolution logic to be applied to every subpath, for every element in the array, to compose the appropriate SELECT statement (see [divergent_paths.md](./divergent_paths.md) for details).
 
-Instead, a mock table (2D array) will be used to track path resolution and associations derived from array structures. This is an extension of the 2D array currently passed to the helper function:
+Instead, a mock table (array of JSON objects) will be used to track path resolution and associations derived from array structures. This is an extension of the 2D array previously passed to the helper function, adding fields as follows:
 
 json_path | db_column | *group* | *root_json* | *value* | *resolved*
 
-- `group` will contain details of associations between values.
+Each 'row' is represented by a JSON object rather than a nested array, as early POC work for the standalone function indicated this would be easier to manage, in particular with regard to adding rows to the table.
+
+- `group` contains details of associations between values.
 - `root_json` is equivalent to the helper function's `par_json` parameter.
-- When an array is encountered, instead of calling the helper function for each subpath for each array element, rows will be added to the table representing those function calls, with updated `json_path`, `group` and `root_json` entries. The rows representing the parent paths will be removed as the subpath rows replace them.
-- `value` and `resolved` are populated when each path is fully resolved. If any `json_path` cannot be resolved i.e. it is not present in the associated `root_json`, that row is removed from the table.
+- When an array is encountered, instead of calling the helper function for each subpath for each array element, rows are added to the table representing those function calls, with updated `json_path`, `group` and `root_json` entries. The rows representing the parent paths are removed as the subpath rows replace them.
+- `value` and `resolved` are populated when each path is fully resolved.
 
 A loop can then be created to cycle through rows in the table until all are marked as resolved. Resolution is not inferred from the presence of a value as fields in the JSON could contain null values, or the text values "NULL"/"<NULL>" etc.
 
