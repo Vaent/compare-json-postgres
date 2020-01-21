@@ -11,6 +11,12 @@ CREATE TABLE sample_2 (
   pg_int int,
   pg_char char
 );
+--CREATE TABLE my_schema.sample_3
+CREATE TABLE sample_3 (
+  pg_arr2_bool bool,
+  pg_arr3_string text,
+  pg_arr3_int int
+);
 
 --INSERT INTO my_schema.sample
 INSERT INTO sample (
@@ -46,6 +52,29 @@ INSERT INTO sample_2 (
   9,
   'a'
 );
+--INSERT INTO my_schema.sample_3
+INSERT INTO sample_3 (
+  pg_arr2_bool,
+  pg_arr3_string,
+  pg_arr3_int
+) VALUES (
+  true,
+  'a2-0-a3-0',
+  0
+), (
+  true,
+  'a2-0-a3-0',
+  1
+), (
+  false,
+  'a2-1-a3-0',
+  0
+), (
+  true,
+  'a2-1-a3-1',
+  11
+);
+
 
 --SELECT * FROM my_schema.sample;
 SELECT * FROM sample;

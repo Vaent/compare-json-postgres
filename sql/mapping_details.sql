@@ -65,6 +65,27 @@ VALUES (
   'alt_schema',
   'alt_table',
   'pg_int'
+), (
+  'sample_json',
+  'array2,bool',
+--  'my_schema',
+  null,
+  'sample_3',
+  'pg_arr2_bool'
+), (
+  'sample_json',
+  'array2,array3,string',
+--  'my_schema',
+  null,
+  'sample_3',
+  'pg_arr3_string'
+), (
+  'sample_json',
+  'array2,array3,int',
+--  'my_schema',
+  null,
+  'sample_3',
+  'pg_arr3_int'
 );
 
 --SELECT * FROM my_schema.mapping_details;

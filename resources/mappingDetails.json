@@ -47,5 +47,26 @@
     "db_schema" : "alt_schema",
     "db_table" : "alt_table",
     "db_column" : "pg_int"
+  },
+  {
+    "json_type" : "sample_json",
+    "json_path" : "array2,bool",
+    "db_schema" : null,
+    "db_table" : "sample_3",
+    "db_column" : "pg_arr2_bool"
+  },
+  {
+    "json_type" : "sample_json",
+    "json_path" : "array2,array3,string",
+    "db_schema" : null,
+    "db_table" : "sample_3",
+    "db_column" : "pg_arr3_string"
+  },
+  {
+    "json_type" : "sample_json",
+    "json_path" : "array2,array3,int",
+    "db_schema" : null,
+    "db_table" : "sample_3",
+    "db_column" : "pg_arr3_int"
   }
 ]

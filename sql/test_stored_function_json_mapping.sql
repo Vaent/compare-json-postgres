@@ -21,6 +21,34 @@ SELECT compare_json_to_postgres(
         "int" : 9,
         "char" : "z"
       }
+    ],
+    "array2" : [
+      {
+        "bool" : true,
+        "array3" : [
+          {
+            "string" : "a2-0-a3-0",
+            "int" : 0
+          },
+          {
+            "string" : "a2-0-a3-1",
+            "int" : 1
+          }
+        ]
+      },
+      {
+        "bool" : false,
+        "array3" : [
+          {
+            "string" : "a2-1-a3-0",
+            "int" : 10
+          },
+          {
+            "string" : "a2-1-a3-1",
+            "int" : 11
+          }
+        ]
+      }
     ]
   }',
   '[
@@ -72,6 +100,27 @@ SELECT compare_json_to_postgres(
       "db_schema" : "alt_schema",
       "db_table" : "alt_table",
       "db_column" : "pg_int"
+    },
+    {
+      "json_type" : "sample_json",
+      "json_path" : "array2,bool",
+      "db_schema" : null,
+      "db_table" : "sample_3",
+      "db_column" : "pg_arr2_bool"
+    },
+    {
+      "json_type" : "sample_json",
+      "json_path" : "array2,array3,string",
+      "db_schema" : null,
+      "db_table" : "sample_3",
+      "db_column" : "pg_arr3_string"
+    },
+    {
+      "json_type" : "sample_json",
+      "json_path" : "array2,array3,int",
+      "db_schema" : null,
+      "db_table" : "sample_3",
+      "db_column" : "pg_arr3_int"
     }
   ]'
 )
