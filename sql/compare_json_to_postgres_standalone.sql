@@ -1,9 +1,13 @@
 DO $PROC$
 DECLARE
   par_json_type text;
-  par_json json;
-  par_mapping_details json;
+  par_json jsonb;
+  par_mapping_details jsonb;
 
+  var_group_array_element int;
+  var_group_array_index int;
+  var_group_combo jsonb;
+  var_group_parent jsonb[];
   var_index int;
   var_match_count int;
   var_message text;
@@ -13,8 +17,6 @@ DECLARE
   var_query text;
   -- var_query_statements text[];
   -- var_query_statements_for_array text[];
-  var_grp_array_element int;
-  var_grp_full_ref jsonb;
   var_resolution_table jsonb[];
   var_row jsonb;
   var_rows_left_to_inspect int;
@@ -25,17 +27,17 @@ DECLARE
   var_value_sub jsonb;
 BEGIN
   par_json_type = 'sample_json';
-  par_json = '{"text":"A string of characters","numeric":123.456,"object":{"boolean":true,"null":null},"array":[{"int":1234,"char":"a"},{"fake":67,"faker":"j"},{"int":9,"char":"z"}]}';
-  par_mapping_details  = '[{"json_type":"sample_json","json_path":"text","db_schema":null,"db_table":"sample","db_column":"pg_text"},{"json_type":"sample_json","json_path":"numeric","db_schema":null,"db_table":"sample","db_column":"pg_numeric"},{"json_type":"sample_json","json_path":"object,boolean","db_schema":null,"db_table":"sample","db_column":"pg_boolean"},{"json_type":"sample_json","json_path":"object,null","db_schema":null,"db_table":"sample","db_column":"pg_empty"},{"json_type":"sample_json","json_path":"array,int","db_schema":null,"db_table":"sample_2","db_column":"pg_int"},{"json_type":"sample_json","json_path":"array,char","db_schema":null,"db_table":"sample_2","db_column":"pg_char"},{"json_type":"sample_json","json_path":"altObject,int","db_schema":"alt_schema","db_table":"alt_table","db_column":"pg_int"}]';
+  par_json = '{"text":"A string of characters","numeric":123.456,"object":{"boolean":true,"null":null},"array":[{"int":1234,"char":"a"},{"fake":67,"faker":"j"},{"int":9,"char":"z"}],"array2":[{"bool":true,"array3":[{"string":"a2-0-a3-0","int":0},{"string":"a2-0-a3-1","int":1}]},{"bool":false,"array3":[{"string":"a2-1-a3-0","int":10},{"string":"a2-1-a3-1","int":11}]}]}';
+  par_mapping_details  = '[{"json_type":"sample_json","json_path":"text","db_schema":null,"db_table":"sample","db_column":"pg_text"},{"json_type":"sample_json","json_path":"numeric","db_schema":null,"db_table":"sample","db_column":"pg_numeric"},{"json_type":"sample_json","json_path":"object,boolean","db_schema":null,"db_table":"sample","db_column":"pg_boolean"},{"json_type":"sample_json","json_path":"object,null","db_schema":null,"db_table":"sample","db_column":"pg_empty"},{"json_type":"sample_json","json_path":"array,int","db_schema":null,"db_table":"sample_2","db_column":"pg_int"},{"json_type":"sample_json","json_path":"array,char","db_schema":null,"db_table":"sample_2","db_column":"pg_char"},{"json_type":"sample_json","json_path":"altObject,int","db_schema":"alt_schema","db_table":"alt_table","db_column":"pg_int"},{"json_type":"sample_json","json_path":"array2,bool","db_schema":null,"db_table":"sample_3","db_column":"pg_arr2_bool"},{"json_type":"sample_json","json_path":"array2,array3,string","db_schema":null,"db_table":"sample_3","db_column":"pg_arr3_string"},{"json_type":"sample_json","json_path":"array2,array3,int","db_schema":null,"db_table":"sample_3","db_column":"pg_arr3_int"}]';
 
-  IF json_typeof(par_mapping_details) != 'array' THEN
+  IF jsonb_typeof(par_mapping_details) != 'array' THEN
     RAISE WARNING 'par_mapping_details argument must be a JSON array but was supplied as %', par_mapping_details;
   END IF;
 
   <<each_schema>>
   FOR var_schema_name IN
     SELECT DISTINCT value::json ->> 'db_schema'
-      FROM json_array_elements(par_mapping_details)
+      FROM jsonb_array_elements(par_mapping_details)
       WHERE value::json ->> 'json_type' = par_json_type
   LOOP
     RAISE DEBUG 'schema: %', var_schema_name;
@@ -43,7 +45,7 @@ BEGIN
     <<each_table_in_schema>>
     FOR var_table_name IN
       SELECT DISTINCT value::json ->> 'db_table'
-        FROM json_array_elements(par_mapping_details)
+        FROM jsonb_array_elements(par_mapping_details)
         WHERE value::json ->> 'json_type' = par_json_type
         AND CASE
           WHEN var_schema_name IS NULL THEN value::json ->> 'db_schema' IS NULL
@@ -67,7 +69,7 @@ BEGIN
           'group', ARRAY['0-0'],
           'root_json', par_json,
           'resolved', false))
-        FROM json_array_elements(par_mapping_details)
+        FROM jsonb_array_elements(par_mapping_details)
         WHERE value::json ->> 'json_type' = par_json_type
         AND CASE
           WHEN var_schema_name IS NULL THEN value::json ->> 'db_schema' IS NULL
@@ -94,6 +96,9 @@ BEGIN
           var_value := var_value #> ARRAY[var_path[x]];
           IF jsonb_typeof(var_value) = 'array' THEN
             var_path_parent := array_to_string(var_path[:x], ',') || ',';
+            SELECT array_agg(jsonb_array_elements)
+              FROM jsonb_array_elements(var_row -> 'group')
+            INTO var_group_parent;
             EXIT get_json_value;
           END IF;
         END LOOP get_json_value;
@@ -108,7 +113,9 @@ BEGIN
             IF var_index > var_rows_left_to_inspect THEN
               EXIT get_array_descendants;
             END IF;
-            IF (var_resolution_table[var_index] ->> 'json_path') LIKE (var_path_parent || '%') THEN
+            IF (var_resolution_table[var_index] ->> 'json_path') LIKE (var_path_parent || '%')
+            AND (SELECT array_agg(jsonb_array_elements) FROM jsonb_array_elements(var_resolution_table[var_index] -> 'group')) = var_group_parent
+            THEN
               var_path_children := var_path_children ||
                 jsonb_build_object(
                   'json_path', REPLACE(var_resolution_table[var_index] ->> 'json_path', var_path_parent, ''),
@@ -124,18 +131,22 @@ BEGIN
           END LOOP get_array_descendants;
 
           IF array_length(var_path_children, 1) > 0 THEN
-            var_grp_array_element = 0;
+            SELECT COALESCE(MAX((string_to_array(grp ->> array_length(var_group_parent, 1), '-'))[1]::int), -1) + 1
+              FROM (SELECT unnest(var_resolution_table || var_path_children) -> 'group' AS grp) as g
+              WHERE (SELECT array_agg(jsonb_array_elements) FROM jsonb_array_elements(grp))[:array_length(var_group_parent, 1)] = var_group_parent
+            INTO var_group_array_index;
+            var_group_array_element = 0;
             <<each_array_element>>
             FOREACH var_value_sub IN ARRAY ARRAY(SELECT jsonb_array_elements(var_value))
             LOOP
-              var_grp_full_ref = to_jsonb(0 || '-' || var_grp_array_element);
+              var_group_combo = to_jsonb(var_group_array_index || '-' || var_group_array_element);
               FOREACH var_row IN ARRAY var_path_children
               LOOP
-                var_row := jsonb_set(var_row, ARRAY['group'], var_row -> 'group' || var_grp_full_ref);
+                var_row := jsonb_set(var_row, ARRAY['group'], var_row -> 'group' || var_group_combo);
                 var_row := jsonb_set(var_row, ARRAY['root_json'], var_value_sub);
                 var_resolution_table := var_resolution_table || var_row;
-              END LOOP ;
-              var_grp_array_element := var_grp_array_element + 1;
+              END LOOP;
+              var_group_array_element := var_group_array_element + 1;
             END LOOP each_array_element;
           END IF;
           -- var_query_statements_for_array := '{}';
