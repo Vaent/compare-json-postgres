@@ -15,8 +15,7 @@ DECLARE
   var_path_children jsonb[];
   var_path_parent text;
   var_query text;
-  -- var_query_statements text[];
-  -- var_query_statements_for_array text[];
+  var_query_statements jsonb[];
   var_resolution_table jsonb[];
   var_row jsonb;
   var_rows_left_to_inspect int;
@@ -149,22 +148,6 @@ BEGIN
               var_group_array_element := var_group_array_element + 1;
             END LOOP each_array_element;
           END IF;
-          -- var_query_statements_for_array := '{}';
-          -- <<prepare_array_statement>>
-          -- FOREACH var_value_sub IN ARRAY ARRAY(SELECT json_array_elements(var_value))
-          -- LOOP
-          --   var_query_statements_for_array := array_append(
-          --     var_query_statements_for_array,
-          --     (SELECT determine_query_conditions(var_value_sub, var_path_child_rows))
-          --   );
-          --   var_query_statements_for_array := array_remove(var_query_statements_for_array, '');
-          -- END LOOP prepare_array_statement;
-          -- IF array_length(var_query_statements_for_array, 1) > 0 THEN
-          --   var_query_statements := array_append(
-          --     var_query_statements,
-          --     '((' || array_to_string(var_query_statements_for_array, ') OR (') || '))'
-          --   );
-          -- END IF;
           -- end array handling
         ELSE
           var_resolution_table := array_remove(var_resolution_table, var_row);
@@ -180,17 +163,20 @@ BEGIN
 
       RAISE DEBUG 'Resolved values for table %: %', var_table_ref, jsonb_pretty(to_jsonb(var_resolution_table));
 
+      -- prepare partial query statements for identical groups
+      SELECT array_agg(jsonb_build_object(
+          'group', grp,
+          'subquery', concat_ws(
+            ' AND ',
+            VARIADIC (SELECT array_agg((vrt ->> 'db_column') || '=' || (vrt -> 'value')) FROM unnest(var_resolution_table) vrt WHERE (vrt -> 'group') = grp)
+          )))
+        FROM (
+          SELECT DISTINCT (vrt -> 'group') grp
+            FROM unnest(var_resolution_table) vrt
+          ) subqueries
+      INTO var_query_statements;
 
-
-
-      -- var_query_statements := array_append(
-      --   var_query_statements,
-      --   var_row ->> 'db_column' || CASE
-      --     WHEN (var_value IS NULL OR var_value::text = 'null') THEN ' IS NULL'
-      --     WHEN var_value::text LIKE '"%"' THEN ' = $str$' || TRIM('"' FROM var_value::text) || '$str$'
-      --     ELSE ' = ' || var_value
-      --     END
-      -- );
+      RAISE DEBUG 'First partial query statements (identical groups): %', jsonb_pretty(to_jsonb(var_query_statements));
 
 
 
