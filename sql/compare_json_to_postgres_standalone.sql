@@ -10,12 +10,14 @@ DECLARE
   var_group_parent jsonb[];
   var_index int;
   var_match_count int;
+  var_max_group_length int;
   var_message text;
   var_path text[];
   var_path_children jsonb[];
   var_path_parent text;
   var_query text;
   var_query_statements jsonb[];
+  var_query_statements_temp jsonb[];
   var_resolution_table jsonb[];
   var_row jsonb;
   var_rows_left_to_inspect int;
@@ -173,11 +175,46 @@ BEGIN
         FROM (
           SELECT DISTINCT (vrt -> 'group') grp
             FROM unnest(var_resolution_table) vrt
-          ) subqueries
+          ) groups
       INTO var_query_statements;
 
       RAISE DEBUG 'First partial query statements (identical groups): %', jsonb_pretty(to_jsonb(var_query_statements));
 
+      SELECT MAX(jsonb_array_length(vqs -> 'group'))
+        FROM unnest(var_query_statements) vqs
+        INTO var_max_group_length;
+
+      -- combine statements for different elements in the same array
+      var_query_statements_temp := ARRAY[]::jsonb[];
+      var_index := 1;
+      WHILE var_index <= array_length(var_query_statements, 1)
+      LOOP
+        IF jsonb_array_length(var_query_statements[var_index] -> 'group') = var_max_group_length THEN
+          var_query_statements_temp := var_query_statements_temp || var_query_statements[var_index];
+          var_query_statements := var_query_statements[:var_index - 1] || var_query_statements[var_index + 1:];
+        ELSE
+          var_index := var_index + 1;
+        END IF;
+      END LOOP;
+
+      SELECT array_agg(jsonb_build_object(
+          'group', parent_grp,
+          'subquery', '(' || concat_ws(
+            ' OR ',
+            VARIADIC (SELECT array_agg(vqst ->> 'subquery') FROM unnest(var_query_statements_temp) vqst WHERE (string_to_array((vqst -> 'group') ->> (var_max_group_length - 1), '-'))[1] = array_id AND (vqst -> 'group') - (var_max_group_length - 1) = parent_grp)
+          ) || ')'
+        ))
+        FROM (
+          SELECT DISTINCT
+              (vqst -> 'group') - (var_max_group_length - 1) parent_grp,
+              (string_to_array((vqst -> 'group') ->> (var_max_group_length - 1), '-'))[1] array_id
+            FROM unnest(var_query_statements_temp) vqst
+          ) groups
+      INTO var_query_statements_temp;
+
+      var_query_statements := var_query_statements || var_query_statements_temp;
+
+      RAISE DEBUG 'Second partial query statements (different elements in same array, deepest nested only): %', jsonb_pretty(to_jsonb(var_query_statements));
 
 
       -- IF var_query = '' THEN
