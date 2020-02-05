@@ -16,7 +16,10 @@ The first is likely to be more suitable where the set of mapping details is larg
 
 This is provided for demonstration/test purposes (it is not required for normal usage).
 
-Executing the queries in [db_setup.sql](./sql/db_setup.sql) will create sample tables based on [sample.json](./resources/sample.json). The "sample" table will be populated with one record matching the contents of [sample.json](./resources/sample.json) and one non-matching record; the "sample_2" table contains two records which are valid matches, one which should not match as the JSON fields are not mapped and one which should not match as the values are not associated in the JSON; the "sample_3" table contains one matching record and three which should not match. The arrays in [sample.json](./resources/sample.json) include a number of entries which are not mapped to the matching values in the database so do not produce a match from the comparison function.
+Executing the queries in [db_setup.sql](./sql/db_setup.sql) will create sample tables based on [sample.json](./resources/sample.json) containing some records which match sample.json, and some which don't match due to values not being in the JSON, values being incorrectly associated in the database, and JSON fields not being mapped. The following outcomes are expected when the comparison function is run:
+- "sample" table contains one matching record
+- "sample_2" table contains two matching records
+- "sample_3" table contains two matching records
 
 ### Mapping details
 

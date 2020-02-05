@@ -34,6 +34,12 @@ SELECT compare_json_to_postgres(
             "string" : "a2-0-a3-1",
             "int" : 1
           }
+        ],
+        "array4" : [
+          {
+            "a" : "04a",
+            "b" : "04b"
+          }
         ]
       },
       {
@@ -46,6 +52,16 @@ SELECT compare_json_to_postgres(
           {
             "string" : "a2-1-a3-1",
             "int" : 11
+          }
+        ],
+        "array4" : [
+          {
+            "a" : "14a",
+            "b" : "14b"
+          },
+          {
+            "a" : "24a",
+            "b" : "24b"
           }
         ]
       }
@@ -121,6 +137,20 @@ SELECT compare_json_to_postgres(
       "db_schema" : null,
       "db_table" : "sample_3",
       "db_column" : "pg_arr3_int"
+    },
+    {
+      "json_type" : "sample_json",
+      "json_path" : "array2,array4,a",
+      "db_schema" : null,
+      "db_table" : "sample_3",
+      "db_column" : "pg_arr4_a"
+    },
+    {
+      "json_type" : "sample_json",
+      "json_path" : "array2,array4,b",
+      "db_schema" : null,
+      "db_table" : "sample_3",
+      "db_column" : "pg_arr4_b"
     }
   ]'
 )

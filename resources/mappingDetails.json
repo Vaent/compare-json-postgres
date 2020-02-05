@@ -68,5 +68,19 @@
     "db_schema" : null,
     "db_table" : "sample_3",
     "db_column" : "pg_arr3_int"
+  },
+  {
+    "json_type" : "sample_json",
+    "json_path" : "array2,array4,a",
+    "db_schema" : null,
+    "db_table" : "sample_3",
+    "db_column" : "pg_arr4_a"
+  },
+  {
+    "json_type" : "sample_json",
+    "json_path" : "array2,array4,b",
+    "db_schema" : null,
+    "db_table" : "sample_3",
+    "db_column" : "pg_arr4_b"
   }
 ]

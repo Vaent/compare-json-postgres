@@ -86,6 +86,20 @@ VALUES (
   null,
   'sample_3',
   'pg_arr3_int'
+), (
+  'sample_json',
+  'array2,array4,a',
+--  'my_schema',
+  null,
+  'sample_3',
+  'pg_arr4_a'
+), (
+  'sample_json',
+  'array2,array4,b',
+--  'my_schema',
+  null,
+  'sample_3',
+  'pg_arr4_b'
 );
 
 --SELECT * FROM my_schema.mapping_details;
