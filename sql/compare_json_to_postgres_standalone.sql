@@ -91,8 +91,8 @@ BEGIN
 
         var_path := string_to_array(var_row ->> 'json_path', ',');
         var_value := var_row ->> 'root_json';
-        <<get_json_value>>
-        FOR x IN 1..array_length(var_path, 1)
+        <<get_json_parent>>
+        FOR x IN 1..(array_length(var_path, 1) - 1)
         LOOP
           var_value := var_value #> ARRAY[var_path[x]];
           IF jsonb_typeof(var_value) = 'array' THEN
@@ -100,12 +100,12 @@ BEGIN
             SELECT array_agg(jsonb_array_elements)
               FROM jsonb_array_elements(var_row -> 'group')
             INTO var_group_parent;
-            EXIT get_json_value;
+            EXIT get_json_parent;
           END IF;
-        END LOOP get_json_value;
+        END LOOP get_json_parent;
 
         IF jsonb_typeof(var_value) = 'array' THEN
-          -- array handling
+          -- array handling; a new unresolved row is added to var_resolution_table for each array entry
           var_path_children := ARRAY[]::text[];
           var_index = 1;
           var_rows_left_to_inspect = array_length(var_resolution_table, 1);
@@ -153,10 +153,17 @@ BEGIN
           -- end array handling
         ELSE
           var_resolution_table := array_remove(var_resolution_table, var_row);
-          IF var_value IS NULL THEN
-            var_row := jsonb_set(var_row, '{value}', 'null');
+          -- to finalise the row, the JSON value is captured as a comparator which will be used in a query
+          -- the transformation is done at this stage to better distinguish between null values and absent fields
+          IF var_value -> var_path[array_length(var_path, 1)] = 'null' THEN
+            -- this captures null values in the JSON
+            var_row := jsonb_set(var_row, '{value}', '"=null"'::jsonb);
+          ELSIF var_value ->> var_path[array_length(var_path, 1)] IS NULL THEN
+            -- this captures missing fields
+            var_row := jsonb_set(var_row, '{value}', '" IS NULL"'::jsonb);
           ELSE
-            var_row := jsonb_set(var_row, '{value}', var_value);
+            -- for non-null fields, get the value as text and wrap in single quotes (this is necessary for JSON strings and is valid for other data types)
+            var_row := jsonb_set(var_row, '{value}', ('"=''' || (var_value ->> var_path[array_length(var_path, 1)]) || '''"')::jsonb);
           END IF;
           var_row := jsonb_set(var_row, '{resolved}', 'true'::jsonb);
           var_resolution_table := var_resolution_table || var_row;
@@ -176,69 +183,100 @@ BEGIN
       LOOP
         RAISE DEBUG 'Preparing query statements for nesting level %', var_max_group_length;
 
-        -- prepare partial query statements for identical groups
+        -- for the current nesting level, get relevant rows from the initial 'resolution table'
         SELECT array_agg(jsonb_build_object(
             'group', vrt -> 'group',
-            'subquery', (vrt ->> 'db_column') || COALESCE('=''' || (vrt ->> 'value') || '''', ' IS NULL')
+            'subquery', (vrt ->> 'db_column') || (vrt ->> 'value')
           ))
           FROM unnest(var_resolution_table) vrt
           WHERE jsonb_array_length(vrt -> 'group') = var_max_group_length
         INTO var_query_statements_temp;
 
-        var_query_statements_temp := var_query_statements || var_query_statements_temp;
+        -- if no further processing needed, skip to next loop iteration to reduce debug clutter
+        IF var_query_statements_temp IS NULL OR array_length(var_query_statements_temp, 1) < 1 THEN
+          var_max_group_length := var_max_group_length - 1;
+          CONTINUE prepare_query_statements;
+        END IF;
 
+        -- combine the new rows with any statements prepared in the previous iteration of <<prepare_query_statements>>
+        var_query_statements := var_query_statements || var_query_statements_temp;
+
+        -- merge the conditions for rows with identical 'group' (different fields on a simple object)
         SELECT array_agg(jsonb_build_object(
             'group', grp,
             'subquery', concat_ws(
               ' AND ',
-              VARIADIC (SELECT array_agg(vqs ->> 'subquery') FROM unnest(var_query_statements_temp) vqs WHERE (vqs -> 'group') = grp)
+              VARIADIC (SELECT array_agg(vqs ->> 'subquery')
+                FROM unnest(var_query_statements) vqs
+                WHERE (vqs -> 'group') = grp)
             )))
           FROM (
             SELECT DISTINCT (vqs -> 'group') grp
-              FROM unnest(var_query_statements_temp) vqs
+              FROM unnest(var_query_statements) vqs
             ) groups
         INTO var_query_statements;
 
-        RAISE DEBUG 'First partial query statements (identical groups): %', jsonb_pretty(to_jsonb(var_query_statements));
-
-        -- combine statements for different elements in the same array
         var_query_statements_temp := ARRAY[]::jsonb[];
         var_index := 1;
+        <<process_null_conditions>>
         WHILE var_index <= array_length(var_query_statements, 1)
         LOOP
           IF jsonb_array_length(var_query_statements[var_index] -> 'group') = var_max_group_length THEN
-            var_query_statements_temp := var_query_statements_temp || var_query_statements[var_index];
+            var_row := var_query_statements[var_index];
+            -- identify JSON null values and update those conditions
+            IF (var_row ->> 'subquery') ~ '.*=null.*' THEN
+              var_row := jsonb_set(var_row, '{subquery}', to_jsonb(regexp_replace(var_row ->> 'subquery', '=null', ' IS NULL', 'g')));
+            -- delete statement if it relates only to fields which are not present in the JSON
+            ELSIF NOT ((var_row ->> 'subquery') ~ '.*=.*') THEN
+              var_row := NULL;
+            END IF;
+            IF var_row IS NOT NULL THEN
+              var_query_statements_temp := var_query_statements_temp || var_row;
+            END IF;
             var_query_statements := var_query_statements[:var_index - 1] || var_query_statements[var_index + 1:];
           ELSE
             var_index := var_index + 1;
           END IF;
-        END LOOP;
+        END LOOP process_null_conditions;
 
+        var_query_statements := var_query_statements || var_query_statements_temp;
+
+        RAISE notice 'First partial query statements (identical groups): %', jsonb_pretty(to_jsonb(var_query_statements));
+
+        -- if no further processing needed, skip to next loop iteration to reduce debug clutter
+        IF array_length(var_query_statements, 1) < 2 THEN
+          var_max_group_length := var_max_group_length - 1;
+          CONTINUE prepare_query_statements;
+        END IF;
+
+        -- combine statements for different elements in the same array
+        -- at the same time, remove the last element of 'group' to indicate this nesting level is resolved
         SELECT array_agg(jsonb_build_object(
             'group', parent_grp,
             'subquery', '(' || concat_ws(
               ' OR ',
-              VARIADIC (SELECT array_agg(vqst ->> 'subquery') FROM unnest(var_query_statements_temp) vqst WHERE (string_to_array((vqst -> 'group') ->> (var_max_group_length - 1), '-'))[1] = array_id AND (vqst -> 'group') - (var_max_group_length - 1) = parent_grp)
+              VARIADIC (SELECT array_agg(vqs ->> 'subquery')
+                FROM unnest(var_query_statements) vqs
+                WHERE (string_to_array((vqs -> 'group') ->> (var_max_group_length - 1), '-'))[1] = array_id AND (vqs -> 'group') - (var_max_group_length - 1) = parent_grp)
             ) || ')'
           ))
           FROM (
             SELECT DISTINCT
-                (vqst -> 'group') - (var_max_group_length - 1) parent_grp,
-                (string_to_array((vqst -> 'group') ->> (var_max_group_length - 1), '-'))[1] array_id
-              FROM unnest(var_query_statements_temp) vqst
+                (vqs -> 'group') - (var_max_group_length - 1) parent_grp,
+                (string_to_array((vqs -> 'group') ->> (var_max_group_length - 1), '-'))[1] array_id
+              FROM unnest(var_query_statements) vqs
             ) groups
-        INTO var_query_statements_temp;
+        INTO var_query_statements;
 
-        var_query_statements := var_query_statements || var_query_statements_temp;
+        -- var_query_statements := var_query_statements || var_query_statements_temp;
 
-        RAISE DEBUG 'Second partial query statements (different elements in same array): %', jsonb_pretty(to_jsonb(var_query_statements));
+        RAISE notice 'Second partial query statements (different elements in same array): %', jsonb_pretty(to_jsonb(var_query_statements));
 
         var_max_group_length := var_max_group_length - 1;
       END LOOP prepare_query_statements;
 
       IF array_length(var_query_statements, 1) <> 1 THEN
-        RAISE EXCEPTION 'A problem occurred while preparing the query for %', var_table_ref;
-        RAISE NOTICE '%', var_query_statements;
+        RAISE EXCEPTION E'A problem occurred while preparing the query for table "%".\nPartial statements produced were: %', var_table_ref, var_query_statements;
         -- RAISE NOTICE 'The JSON contains no fields associated with the "%" table', var_table_ref;
       ELSE
         var_query := 'SELECT COUNT(*) FROM ' || var_table_ref || ' WHERE ' || (var_query_statements[1] ->> 'subquery');
