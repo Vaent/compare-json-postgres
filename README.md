@@ -1,22 +1,30 @@
 # Compare JSON data against records in a PostgreSQL database
 
-Developing a method to identify whether values in a JSON object have been stored in a database, where JSON fields are mapped to specific database columns.
+Developing a method to identify whether values in a JSON object have been stored in a database.
 
-Two options are provided:
-- look up JSON-database mapping details from a reference table in the database; or
-- pass an additional JSON argument which contains the mapping details.
+This work is intended for testing code which writes records to a Postgres database, to save time where the alternative would be a manual check of potentially hundreds of values across multiple tables. It requires fields in the input JSON to be mapped to specific database columns, so is most useful when this information is already available or when testing is frequent enough to justify creating and maintaining the mapping data.
 
-The first is likely to be more suitable where the set of mapping details is large, or the function is likely to be used frequently. The second is provided as an alternative in case it is undesirable to maintain mapping details in a database table, and may be better suited for occasional evaluation of small data sets or where the mapping details change frequently.
+Three options are provided:
+
+- `compare_json_to_postgres.sql`, a stored function which gets JSON-database mapping details from a reference table in the database; recommended if the set of mapping details is large, or the function is likely to be used frequently.
+- `compare_json_to_postgres_json_mapping.sql`, a similar stored function which takes the mapping details as a JSON parameter; recommended if it is undesirable to maintain mapping details in a database table, may be useful where the collection of mapping details is small or changes frequently.
+- `compare_json_to_postgres_standalone.sql`, a "DO block" which can be executed without storing anything in the database (besides the data being tested); this is provided as an alternative to creating stored functions, but the other options should generally be preferred due to their lower complexity.
+
+All of these check the input JSON for fields which are mapped to database columns, use those values to build SQL queries, then execute the queries and print the number of records in each table which match the JSON.
 
 ## Setup
 
-*Note: all scripts include alternative lines (commented out) for defining and using a custom schema if the default 'public' schema is not appropriate. In all cases these are intended to replace, not supplement, the lines which immediately follow them. Users must ensure the relevant lines are updated in all locations, in all scripts if not using the default schema.*
+*Note: most scripts include alternative lines (commented out) for defining and using a custom schema if the default schema is not appropriate. These are intended to replace, not supplement, the lines which immediately follow them. Users must ensure the relevant lines are updated in all locations, in all scripts if not using the default schema.*
 
 ### Sample data
 
-This is provided for demonstration/test purposes (it is not required for normal usage).
+This is provided for demonstrating/testing the functions (it is not required for normal usage).
 
-Executing the queries in [db_setup.sql](./sql/db_setup.sql) will create sample tables based on [sample.json](./resources/sample.json). The "sample" table will be populated with one record matching the contents of [sample.json](./resources/sample.json) and one non-matching record; the "sample_2" table contains two records which are valid matches, one which should not match as the JSON fields are not mapped and one which should not match as the values are not associated in the JSON. The array in [sample.json](./resources/sample.json) includes a pair of fields ("fake"/"faker") which are not mapped to the matching values in the database so do not produce a match from the comparison function.
+Executing the [db_setup.sql](./sql/db_setup.sql) script will create sample tables based on [sample.json](./resources/sample.json) containing some records which match sample.json, and some which don't match due to values not being in the JSON, values being incorrectly associated in the database, and JSON fields not being mapped. The following outcomes are expected when the comparison function is run:
+
+- "sample" table contains one matching record
+- "sample_2" table contains two matching records
+- "sample_3" table contains two matching records
 
 ### Mapping details
 
@@ -26,7 +34,7 @@ Executing the queries in [db_setup.sql](./sql/db_setup.sql) will create sample t
 
 #### Database table for mapping details
 
-Executing the queries in [mapping_details.sql](./sql/mapping_details.sql) creates the reference table, populated for the sample structures plus an unused mapping for negative testing. The table created will look like this:
+Executing the [mapping_details.sql](./sql/mapping_details.sql) script creates the reference table, populated for the sample structures plus an unused mapping for negative testing. The table created will look like this:
 
 json_type   | json_path      | db_schema     | db_table    | db_column  
 :-----------|:---------------|:--------------|:------------|:-----------
@@ -38,9 +46,15 @@ sample_json | array,int      | [null]        | sample_2    | pg_int
 sample_json | array,char     | [null]        | sample_2    | pg_char
 sample_json | altObject,int  | alt_schema    | alt_table   | pg_int
 
+This pattern can be repurposed for inserting real mapping details.
+
 #### JSON format for mapping details
 
 See [mappingDetails.json](./resources/mappingDetails.json) for the JSON equivalent of the above.
+
+`test_stored_function_json_mapping.sql` includes the JSON-format mapping details as an argument in the function call.
+
+`compare_json_to_postgres_standalone.sql` assigns the mapping JSON directly to a variable in the code block (with whitespace removed for ease of reading the code).
 
 ### Stored functions
 
@@ -52,7 +66,11 @@ When either of the above scripts is executed, a second function, `determine_quer
 
 *Note: both scripts use `CREATE FUNCTION` statements rather than `CREATE OR REPLACE FUNCTION`, to avoid accidentally overwriting existing functions. If both versions of the main procedure are required, the declaration for the helper function should be omitted when executing the second script.*
 
-The `compare_json_to_postgres` procedure can be invoked as demonstrated in [test_stored_function.sql](./sql/test_stored_function.sql) or [test_stored_function_json_mapping.sql](./sql/test_stored_function_json_mapping.sql), respectively, for the sample data.
+## Running the code
+
+The `compare_json_to_postgres` stored procedure can be invoked as demonstrated in [test_stored_function.sql](./sql/test_stored_function.sql) or [test_stored_function_json_mapping.sql](./sql/test_stored_function_json_mapping.sql), for the sample data.
+
+The `compare_json_to_postgres_standalone` DO block can be run as is. Values passed as arguments to the stored functions are assigned directly to variables in this version.
 
 Results are output as `RAISE NOTICE` statements. In pgAdmin these are displayed on a separate tab in the Data Output panel:
 
@@ -60,12 +78,24 @@ Results are output as `RAISE NOTICE` statements. In pgAdmin these are displayed 
 
 Additional information is available from `RAISE DEBUG` statements; by default these messages are not displayed but if required they can be viewed by changing the logging level (or changing the code to raise them at NOTICE level).
 
-## Limitations
+## Implementation notes
 
-See [divergent_paths.md](./divergent_paths.md) for a breakdown of how arrays are handled.
+### Arrays
 
-There is no handling of references to specific indices in an array:
-```
-"arr" : ["a", "b", "c"]
-```
--> path "arr" matches "a" or "b" or "c"; path "arr,1" matches nothing.
+See [divergent_paths.md](./divergent_paths.md) for a breakdown of how associations in the JSON are maintained, including array handling.
+
+Note: the query construction logic of `compare_json_to_postgres_standalone` differs from the stored functions, which rely on recursively calling a second stored function to easily process arrays. [recursion_algorithm.md](recursion_algorithm.md) describes the approach taken to create the standalone DO block.
+
+All arrays are treated as unordered containers of objects. Arrays of simple values (like `[1, 2, 3]`) cannot currently be processed, and there is no handling of references to specific indices in an array:
+
+    "arr" : [ {"a":"foo"} , {"a":"bar"} ]
+
+-> path "arr,a" matches "foo" or "bar"; paths "arr,1" and "arr,1,a" match nothing.
+
+Since `"1"` is a valid JSON key, the digit in "arr,1" could refer to either an array index or a field name, so significant changes would be needed to accommodate ordered arrays as well as generic arrays.
+
+### Null values
+
+If a mapped field is not present in the input JSON, it is expected to be `NULL` in the database. Caveat: for a given table, if all mapped fields are not present in the JSON, the comparison function will not match records where all mapped columns contain `NULL` - the record must include at least one value which is present in the JSON.
+
+If a field exists in the JSON with value `null`, it is expected to be `NULL` in the database. This may allow the comparison function to match records where all mapped columns contain `NULL`, since at least one of those is a real match to the JSON (not inferred from an absent field). **IMPORTANT**: the standalone version may fail to match valid all-null records in some circumstances so should not be relied on if that scenario is likely.
