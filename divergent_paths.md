@@ -51,32 +51,35 @@ A further assumption is made that associations in the JSON should be maintained 
 ## Summary
 
 Each distinct path produces 'AND-style' conditions in the SQL; each array 'node' in the JSON produces 'OR-style' conditions in the SQL; conditions for subpaths below an array node must be located under the array condition rather than at the top level.
-```
-{
-  "one" : [
+
     {
-      "two" : 21,
-      "three" : 31
-    },
-    {
-      "two" : 22,
-      "three" : 32
+      "array1" : [
+        {
+          "one" : 11,
+          "two" : 21
+        },
+        {
+          "one" : 12,
+          "two" : 22
+        }
+      ],
+      "array2" : [
+        { "three" : 31 },
+        { "three" : 32 },
+        { "three" : 33 }
+      ],
+      "four" : 4
     }
-  ],
-  "four" : [41, 42, 43],
-  "five" : 5
-}
-```
-```
-SELECT * FROM records WHERE
-  (
-    (two = 21 AND three = 31)
-    OR
-    (two = 22 AND three = 32)
-  )
-  AND
-  (four = 41 OR four = 42 OR four = 43)
-  AND
-  five = 5;
-```
-Note: a separate query is produced for each table, so if the contents of "one" and "four" were stored in different tables there would be two queries with fewer valid combinations than the above example.
+
+    SELECT * FROM records WHERE
+      (
+        (one = 11 AND two = 21)
+        OR
+        (one = 12 AND two = 22)
+      )
+      AND
+      (three = 31 OR three = 32 OR three = 33)
+      AND
+      four = 4;
+
+Note: a separate query is produced for each table, so if the contents of "array1" and "array2" were stored in different tables there would be two queries with fewer valid combinations than the above example.
