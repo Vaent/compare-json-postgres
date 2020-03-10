@@ -241,7 +241,7 @@ BEGIN
 
         var_query_statements := var_query_statements || var_query_statements_temp;
 
-        RAISE notice 'First partial query statements (identical groups): %', jsonb_pretty(to_jsonb(var_query_statements));
+        RAISE DEBUG 'First partial query statements (identical groups): %', jsonb_pretty(to_jsonb(var_query_statements));
 
         -- if no further processing needed, skip to next loop iteration to reduce debug clutter
         IF array_length(var_query_statements, 1) < 2 THEN
@@ -270,7 +270,7 @@ BEGIN
 
         -- var_query_statements := var_query_statements || var_query_statements_temp;
 
-        RAISE notice 'Second partial query statements (different elements in same array): %', jsonb_pretty(to_jsonb(var_query_statements));
+        RAISE DEBUG 'Second partial query statements (different elements in same array): %', jsonb_pretty(to_jsonb(var_query_statements));
 
         var_max_group_length := var_max_group_length - 1;
       END LOOP prepare_query_statements;
