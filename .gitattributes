@@ -1,0 +1,5 @@
+sql/compare_json_to_postgres_standalone.sql linguist-language=PostgreSQL
+sql/db_setup.sql linguist-language=PostgreSQL
+sql/mapping_details.sql linguist-language=PostgreSQL
+sql/test_stored_function.sql linguist-language=PostgreSQL
+sql/test_stored_function_json_mapping.sql linguist-language=PostgreSQL
