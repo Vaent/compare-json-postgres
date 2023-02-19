@@ -1,3 +1,5 @@
+*.sql linguist-detectable
+
 sql/compare_json_to_postgres_standalone.sql linguist-language=SQL
 sql/db_setup.sql linguist-language=SQL
 sql/mapping_details.sql linguist-language=SQL
